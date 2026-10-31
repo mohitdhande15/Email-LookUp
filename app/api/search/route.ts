@@ -3,61 +3,61 @@ import { checkGravatar } from "@/lib/sources/gravatar";
 import { checkGitHub } from "@/lib/sources/github";
 import { checkBreach } from "@/lib/sources/breach";
 import type { SourceResult } from "@/lib/sources/types";
-
-// nodejs is the default runtime (edge is deprecated in Next.js 16)
-// No runtime export needed
+import { searchRateLimiter } from "@/lib/rateLimit";
+import { osintCache } from "@/lib/cache";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL_LENGTH = 254; // RFC 5321
+const SOURCE_TIMEOUT_MS = 10_000;
 
-// ── Simple in-memory rate limiter: 10 req / IP / hour ──────────────
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_MAX = 10;
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return true; // allowed
-  }
-  if (entry.count >= RATE_LIMIT_MAX) return false; // blocked
-  entry.count++;
-  return true;
-}
-
-// ── Timeout wrapper ─────────────────────────────────────────────────
 function withTimeout<T>(
   fn: (signal: AbortSignal) => Promise<T>,
-  ms: number
+  ms: number,
+  fallback: T
 ): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  return fn(controller.signal).finally(() => clearTimeout(timer));
+  return fn(controller.signal)
+    .catch(() => fallback)
+    .finally(() => clearTimeout(timer));
 }
 
 export async function POST(request: NextRequest) {
-  // Rate limit by IP
+  // Rate limit by client IP
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     request.headers.get("x-real-ip") ??
-    "unknown";
+    "anonymous";
 
-  if (!checkRateLimit(ip)) {
-    return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
-      status: 429,
-      headers: { "Content-Type": "application/json" },
-    });
+  const rateLimitStatus = searchRateLimiter.check(ip);
+
+  if (!rateLimitStatus.allowed) {
+    return new Response(
+      JSON.stringify({
+        error: "Rate limit exceeded. Please wait before running another query.",
+        resetAt: new Date(rateLimitStatus.resetAt).toISOString(),
+      }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(Math.floor(rateLimitStatus.resetAt / 1000)),
+          "Retry-After": String(
+            Math.max(1, Math.ceil((rateLimitStatus.resetAt - Date.now()) / 1000))
+          ),
+        },
+      }
+    );
   }
 
-  // Parse and validate body
+  // Parse and validate email
   let email: string;
   try {
     const body = await request.json();
-    email = (body?.email ?? "").toString().trim();
+    email = (body?.email ?? "").toString().trim().toLowerCase();
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+    return new Response(JSON.stringify({ error: "Invalid JSON request body" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
@@ -65,14 +65,16 @@ export async function POST(request: NextRequest) {
 
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_REGEX.test(email)) {
     return new Response(
-      JSON.stringify({ error: "Invalid email address" }),
+      JSON.stringify({ error: "Please enter a valid email address." }),
       { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
 
-  // Build a streaming response with newline-delimited JSON
   const encoder = new TextEncoder();
-  const TIMEOUT_MS = 10_000;
+
+  // Check cache first
+  const cacheKey = `osint:${email}`;
+  const cachedResults = osintCache.get(cacheKey) as SourceResult[] | undefined;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -80,25 +82,50 @@ export async function POST(request: NextRequest) {
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       }
 
-      // Run all three sources in parallel; each has its own 10s timeout
+      if (cachedResults && Array.isArray(cachedResults)) {
+        for (const res of cachedResults) {
+          send(res);
+        }
+        send({ done: true, fromCache: true });
+        controller.close();
+        return;
+      }
+
+      const accumulatedResults: SourceResult[] = [];
+
+      // Run sources in parallel with independent timeouts
       const tasks: Promise<SourceResult>[] = [
-        withTimeout((signal) => checkGravatar(email, signal), TIMEOUT_MS),
-        withTimeout((signal) => checkGitHub(email, signal), TIMEOUT_MS),
-        withTimeout((signal) => checkBreach(email, signal), TIMEOUT_MS),
+        withTimeout<SourceResult>(
+          (signal) => checkGravatar(email, signal),
+          SOURCE_TIMEOUT_MS,
+          { source: "gravatar", status: "error", message: "Timeout" }
+        ),
+        withTimeout<SourceResult>(
+          (signal) => checkGitHub(email, signal),
+          SOURCE_TIMEOUT_MS,
+          { source: "github", status: "error", message: "Timeout" }
+        ),
+        withTimeout<SourceResult>(
+          (signal) => checkBreach(email, signal),
+          SOURCE_TIMEOUT_MS,
+          { source: "breach", status: "error", message: "Timeout" }
+        ),
       ];
 
-      // Stream results as they settle
       const settled = tasks.map((p) =>
-        p
-          .then((result) => {
-            send(result);
-          })
-          .catch(() => {
-            // Should never happen because source functions catch their own errors
-          })
+        p.then((result) => {
+          accumulatedResults.push(result);
+          send(result);
+        })
       );
 
       await Promise.allSettled(settled);
+
+      // Cache accumulated results for 10 minutes
+      if (accumulatedResults.length > 0) {
+        osintCache.set(cacheKey, accumulatedResults, 10 * 60 * 1000);
+      }
+
       send({ done: true });
       controller.close();
     },
@@ -106,9 +133,10 @@ export async function POST(request: NextRequest) {
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "application/x-ndjson",
-      "Cache-Control": "no-store",
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
       "X-Content-Type-Options": "nosniff",
+      "X-RateLimit-Remaining": String(rateLimitStatus.remaining),
     },
   });
 }

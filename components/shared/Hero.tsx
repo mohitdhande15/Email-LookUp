@@ -14,6 +14,7 @@ import {
 import { content } from "@/lib/content";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import type { SourceResult } from "@/lib/sources/types";
+import { consumeNdjsonStream } from "@/lib/ndjsonStream";
 
 /* ── 3 Real Sources Hero Card ────────────────────────────────────── */
 
@@ -367,8 +368,8 @@ export function Hero({ onSearch, searchState, onClear }: HeroProps) {
       query: trimmed,
       email: trimmed,
       searching: true,
-      progress: 45,
-      progressLabel: "Checking public profiles…",
+      progress: 25,
+      progressLabel: "Querying OSINT sources in parallel…",
       results: [],
     });
 
@@ -386,19 +387,75 @@ export function Hero({ onSearch, searchState, onClear }: HeroProps) {
           email: trimmed,
           searching: false,
           results: [],
-          error: errData.error ?? `Error: ${res.status}`,
+          error:
+            errData.error ??
+            (res.status === 429
+              ? "Rate limit reached. Please wait before running another search."
+              : `Search returned status ${res.status}`),
         });
         return;
       }
 
-      const data = await res.json();
+      if (!res.body) {
+        // Fallback if response has no streaming body
+        const data = await res.json().catch(() => ({}));
+        onSearch({
+          query: trimmed,
+          email: trimmed,
+          searching: false,
+          progress: 100,
+          progressLabel: "Search complete",
+          results: Array.isArray(data.results) ? data.results : [],
+        });
+        return;
+      }
+
+      const accumulatedResults: SourceResult[] = [];
+
+      await consumeNdjsonStream<SourceResult & { done?: boolean }>(
+        res.body,
+        (item) => {
+          if (item.done) {
+            onSearch({
+              query: trimmed,
+              email: trimmed,
+              searching: false,
+              progress: 100,
+              progressLabel: "Search complete",
+              results: [...accumulatedResults],
+            });
+            return;
+          }
+
+          if (item.source) {
+            // Deduplicate if needed
+            const idx = accumulatedResults.findIndex((r) => r.source === item.source);
+            if (idx >= 0) {
+              accumulatedResults[idx] = item;
+            } else {
+              accumulatedResults.push(item);
+            }
+
+            onSearch({
+              query: trimmed,
+              email: trimmed,
+              searching: true,
+              progress: Math.min(95, 30 + accumulatedResults.length * 22),
+              progressLabel: `Received ${item.source} response…`,
+              results: [...accumulatedResults],
+            });
+          }
+        }
+      );
+
+      // Ensure searching flag is turned off when stream finishes
       onSearch({
         query: trimmed,
         email: trimmed,
         searching: false,
         progress: 100,
         progressLabel: "Search complete",
-        results: data.results ?? [],
+        results: [...accumulatedResults],
       });
     } catch {
       onSearch({
@@ -406,7 +463,7 @@ export function Hero({ onSearch, searchState, onClear }: HeroProps) {
         email: trimmed,
         searching: false,
         results: [],
-        error: "Network error occurred. Please try again.",
+        error: "Network error occurred while contacting search services. Please try again.",
       });
     }
   }

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { getAuthSecret } from "@/lib/config";
 import { getDeleteHelpUrl, isDomainInDeleteLinks } from "@/lib/deleteLinks";
 import { getBrandName } from "@/lib/brandNames";
 import { isSendingDomain } from "@/lib/sendingDomains";
@@ -154,14 +155,14 @@ export async function POST(request: NextRequest) {
   const isSecure = cookieHeader.includes("__Secure-authjs.session-token");
   const token = await getToken({
     req: request,
-    secret: process.env.AUTH_SECRET || "smart-digital-declutter-development-secret-key-32chars",
+    secret: getAuthSecret(),
     secureCookie: isSecure,
   });
 
-  if (!token || !token.accessToken) {
+  if (!token || !token.accessToken || token.error === "RefreshAccessTokenError") {
     return new Response(
       JSON.stringify({
-        error: "Authentication required. Please sign in with your Google account to scan your mailbox.",
+        error: "Google session expired or authorization was revoked. Please sign in again.",
       }),
       {
         status: 401,
