@@ -1,0 +1,201 @@
+// ==============================================================================
+// PRISMA SCHEMA: EMAIL-LOOKUP PERSONAL CYBER-DEFENSE PLATFORM
+// ==============================================================================
+// Target Production Database: PostgreSQL (or local SQLite/PostgreSQL development)
+// ==============================================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum FindingCategory {
+  IDENTITY
+  FINANCIAL
+  SECURITY
+  PRIVACY
+}
+
+enum FindingSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+enum VerificationStatus {
+  CONFIRMED_FACT
+  VERIFIED_USER
+  HIGH_INFERENCE
+  LOW_INFERENCE
+  UNVERIFIED
+}
+
+enum SourceReliability {
+  AUTHORITATIVE
+  RELIABLE
+  MODERATE
+  UNVERIFIED
+}
+
+enum EntityType {
+  EMAIL_IDENTITY
+  PERSON_PROFILE
+  ORGANIZATION
+  DOMAIN
+  PLATFORM_ACCOUNT
+  SUBSCRIPTION
+  SECURITY_EVENT
+  DATA_BREACH
+  OAUTH_APPLICATION
+  CRYPTOGRAPHIC_IDENTITY
+}
+
+enum RelationshipType {
+  ASSOCIATED_WITH
+  DISCOVERED_ON
+  EXPOSED_IN
+  SUBSCRIBED_TO
+  AUTHENTICATED_WITH
+  RECEIVED_FROM
+  RELATED_TO
+}
+
+model User {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  name          String?
+  image         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  preferences   UserPreference?
+  scanHistories ScanHistory[]
+  findings      Finding[]
+  entities      Entity[]
+  relationships Relationship[]
+  evidence      Evidence[]
+
+  @@index([email])
+}
+
+model UserPreference {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme             String   @default("dark")
+  defaultRegulation String   @default("COMBINED")
+  autoSaveHistory   Boolean  @default(true)
+  maxStoredScans    Int      @default(20)
+  updatedAt         DateTime @updatedAt
+}
+
+model ScanHistory {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timestamp         DateTime @default(now())
+  totalPlatforms    Int
+  totalAccounts     Int
+  inactiveAccounts  Int
+  highRiskAccounts  Int
+  overallRiskScore  Int
+
+  @@index([userId, timestamp(sort: Desc)])
+}
+
+model Finding {
+  id                 String             @id
+  userId             String
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category           FindingCategory
+  subcategory        String
+  title              String
+  description        String
+  source             String
+  sourceReference    String?
+  observedAt         DateTime           @default(now())
+  eventAt            DateTime?
+  severity           FindingSeverity
+  verificationStatus VerificationStatus
+  confidenceScore    Float
+  confidenceReason   String
+
+  payload            Json
+  metadata           Json?
+
+  evidence           Evidence[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([userId, category])
+  @@index([userId, severity])
+  @@index([userId, observedAt(sort: Desc)])
+}
+
+model Entity {
+  id              String             @id
+  userId          String
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type            EntityType
+  primaryValue    String
+  displayName     String
+  attributes      Json
+  firstObservedAt DateTime           @default(now())
+  lastObservedAt  DateTime           @default(now())
+  confidenceScore Float
+  isConfirmed     Boolean            @default(false)
+  metadata        Json?
+
+  sourceRelations Relationship[]     @relation("SourceEntity")
+  targetRelations Relationship[]     @relation("TargetEntity")
+
+  @@unique([userId, type, primaryValue])
+  @@index([userId, type])
+}
+
+model Relationship {
+  id              String           @id
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceEntityId  String
+  sourceEntity    Entity           @relation("SourceEntity", fields: [sourceEntityId], references: [id], onDelete: Cascade)
+  targetEntityId  String
+  targetEntity    Entity           @relation("TargetEntity", fields: [targetEntityId], references: [id], onDelete: Cascade)
+  type            RelationshipType
+  source          String
+  evidenceIds     String[]
+  confidenceScore Float
+  isConfirmed     Boolean          @default(false)
+  observedAt      DateTime         @default(now())
+  metadata        Json?
+
+  @@index([userId, sourceEntityId])
+  @@index([userId, targetEntityId])
+}
+
+model Evidence {
+  id               String            @id
+  findingId        String?
+  finding          Finding?          @relation(fields: [findingId], references: [id], onDelete: SetNull)
+  userId           String
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source           String
+  type             String
+  reliability      SourceReliability
+  observedAt       DateTime          @default(now())
+  summary          String
+  sanitizedSnippet String?
+  fingerprint      String
+  sourceUrl        String?
+  retrievedAt      DateTime          @default(now())
+  metadata         Json?
+
+  @@unique([userId, fingerprint])
+  @@index([userId, findingId])
+}
