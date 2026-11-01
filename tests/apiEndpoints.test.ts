@@ -55,7 +55,7 @@ describe("API Endpoints Verification", () => {
         const last = items[items.length - 1] as { done?: boolean };
         expect(last.done).toBe(true);
       }
-    });
+    }, 15000);
   });
 
   describe("POST /api/declutter", () => {

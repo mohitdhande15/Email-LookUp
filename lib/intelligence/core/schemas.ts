@@ -104,7 +104,7 @@ export const FinancialFindingPayloadSchema = z.object({
   estimatedAmount: z.number().nonnegative().optional(),
   currency: z.string().optional(),
   billingFrequency: z
-    .enum(["MONTHLY", "ANNUAL", "WEEKLY", "ONE_OFF", "UNKNOWN"])
+    .enum(["MONTHLY", "ANNUAL", "QUARTERLY", "WEEKLY", "ONE_OFF", "UNKNOWN"])
     .optional(),
   lastBilledDate: z.string().optional(),
   renewalDate: z.string().optional(),

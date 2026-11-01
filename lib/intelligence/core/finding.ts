@@ -46,7 +46,7 @@ export interface FinancialFindingPayload {
   merchantName: string;
   estimatedAmount?: number;
   currency?: string;
-  billingFrequency?: "MONTHLY" | "ANNUAL" | "WEEKLY" | "ONE_OFF" | "UNKNOWN";
+  billingFrequency?: "MONTHLY" | "ANNUAL" | "QUARTERLY" | "WEEKLY" | "ONE_OFF" | "UNKNOWN";
   lastBilledDate?: string;
   renewalDate?: string;
   trialExpirationDate?: string;
