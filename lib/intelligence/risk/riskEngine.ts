@@ -71,15 +71,41 @@ export class RiskEngine {
           }
         }
 
-        if (payload.eventType === "SUSPICIOUS_ACTIVITY" || payload.eventType === "NEW_LOGIN_DETECTED") {
-          score += 15;
+        if (payload.eventType === "MFA_DISABLED") {
+          score += 30;
+          factors.push({
+            id: `mfa_disabled_${f.id}`,
+            category: "CREDENTIAL_VULNERABILITY",
+            title: `Critical: MFA Disabled on ${payload.serviceName}`,
+            description: "Multi-factor authentication was disabled or removed, leaving account exposed to credential stuffing.",
+            scoreContribution: 30,
+            remediationAction: `Re-enable Multi-Factor Authentication immediately on ${payload.serviceName}.`,
+            sourceFindingId: f.id,
+          });
+        }
+
+        if (payload.eventType === "UNFAMILIAR_DEVICE_LOGIN" || payload.eventType === "SUSPICIOUS_ACTIVITY") {
+          score += 20;
           factors.push({
             id: `suspicious_login_${f.id}`,
             category: "CREDENTIAL_VULNERABILITY",
-            title: `Suspicious Security Notification: ${payload.serviceName}`,
-            description: "An unconfirmed login alert or security warning was observed.",
+            title: `Unfamiliar / Suspicious Login: ${payload.serviceName}`,
+            description: "An unconfirmed login alert or security warning was observed from an unfamiliar device or IP.",
+            scoreContribution: 20,
+            remediationAction: `Revoke active sessions and confirm account security settings on ${payload.serviceName}.`,
+            sourceFindingId: f.id,
+          });
+        }
+
+        if (payload.eventType === "RECOVERY_INFO_CHANGED") {
+          score += 15;
+          factors.push({
+            id: `recovery_changed_${f.id}`,
+            category: "CREDENTIAL_VULNERABILITY",
+            title: `Recovery Info Changed: ${payload.serviceName}`,
+            description: "Secondary email or phone was updated. Verify this modification was authorized.",
             scoreContribution: 15,
-            remediationAction: "Revoke active sessions and confirm account security settings.",
+            remediationAction: `Check recovery options on ${payload.serviceName}.`,
             sourceFindingId: f.id,
           });
         }

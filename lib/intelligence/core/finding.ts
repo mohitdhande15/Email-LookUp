@@ -61,15 +61,34 @@ export interface SecurityFindingPayload {
   eventType:
     | "BREACH_EXPOSURE"
     | "PASSWORD_RESET"
+    | "PASSWORD_CHANGED"
     | "NEW_LOGIN_DETECTED"
+    | "UNFAMILIAR_DEVICE_LOGIN"
+    | "FAILED_LOGIN_WARNING"
+    | "ACCOUNT_RECOVERY_ATTEMPT"
     | "MFA_MODIFIED"
+    | "MFA_ENABLED"
+    | "MFA_DISABLED"
     | "API_KEY_CREATED"
+    | "API_TOKEN_REVOKED"
+    | "OAUTH_APP_AUTHORIZED"
+    | "SSH_KEY_ADDED"
+    | "PERMISSION_CHANGED"
+    | "ACCOUNT_SUSPENDED"
+    | "SECURITY_VERIFICATION_REQUIRED"
     | "RECOVERY_INFO_CHANGED"
     | "SUSPICIOUS_ACTIVITY";
   eventDate?: string;
   compromisedDataClasses?: string[];
   breachName?: string;
   isRemediationConfirmedByUser?: boolean;
+  ipAddress?: string;
+  device?: string;
+  browser?: string;
+  location?: string;
+  isLocationEstimated?: boolean;
+  remediationUrl?: string;
+  actionStatus?: "ATTEMPTED" | "COMPLETED" | "BLOCKED" | "UNKNOWN";
 }
 
 export interface PrivacyFindingPayload {

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { content } from "@/lib/content";
-import { Sparkles, LogOut, Search, CreditCard } from "lucide-react";
+import { Sparkles, LogOut, Search, CreditCard, Shield } from "lucide-react";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -15,6 +15,7 @@ export function Navbar() {
 
   const isDeclutterActive = pathname === "/";
   const isFinancialActive = pathname.startsWith("/financial");
+  const isSecurityActive = pathname.startsWith("/security");
   const isLookupActive = pathname.startsWith("/lookup");
 
   useEffect(() => {
@@ -106,6 +107,28 @@ export function Navbar() {
           >
             <CreditCard size={13} aria-hidden />
             <span>Financial</span>
+          </Link>
+
+          {/* Security Intelligence (links to /security) */}
+          <Link
+            href="/security"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all border ${
+              isSecurityActive
+                ? "font-semibold shadow-sm"
+                : "text-foreground/60 hover:text-foreground hover:bg-white/5 border-transparent"
+            }`}
+            style={
+              isSecurityActive
+                ? {
+                    background: "color-mix(in oklch, var(--color-accent) 15%, transparent)",
+                    color: "var(--color-accent)",
+                    borderColor: "color-mix(in oklch, var(--color-accent) 35%, transparent)",
+                  }
+                : undefined
+            }
+          >
+            <Shield size={13} aria-hidden />
+            <span>Security</span>
           </Link>
 
           {/* Lookup (links to /lookup) */}
