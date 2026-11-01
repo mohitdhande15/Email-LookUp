@@ -1,5 +1,7 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import { getAuthSecret } from "@/lib/config";
+import { refreshGoogleAccessToken, type OAuthTokenData } from "@/lib/oauthRefresh";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -18,19 +20,32 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async jwt({ token, account }) {
-      // Store the OAuth access token on the server-side JWT only
+      // 1. Initial sign in: capture access token, refresh token and expiry
       if (account) {
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
         token.expiresAt = account.expires_at;
+        return token;
       }
-      return token;
+
+      // 2. Return token if it is still valid (with 60-second grace buffer)
+      const expiresAtMs = typeof token.expiresAt === "number" ? token.expiresAt * 1000 : 0;
+      if (expiresAtMs && Date.now() < expiresAtMs - 60_000) {
+        return token;
+      }
+
+      // 3. Access token has expired; refresh it using Google OAuth token endpoint
+      return await refreshGoogleAccessToken(token as OAuthTokenData);
     },
-    async session({ session }) {
-      // Keep the access token server-side only. Never expose it to client code or logs.
-      // The client session receives standard public user profile information only.
+    async session({ session, token }) {
+      // Keep sensitive OAuth access/refresh tokens server-side only.
+      // Expose error status if session refresh failed so UI can prompt sign-in.
+      if (token?.error && typeof token.error === "string") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (session as any).error = token.error;
+      }
       return session;
     },
   },
-  secret: process.env.AUTH_SECRET || "smart-digital-declutter-development-secret-key-32chars",
+  secret: getAuthSecret(),
 });

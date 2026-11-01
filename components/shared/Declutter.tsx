@@ -21,16 +21,12 @@ import {
   HelpCircle,
   ShieldAlert,
   ArrowRight,
-  Copy,
-  Check,
-  X,
-  Send,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  generateLegalErasureNotice,
-  type LegalErasureRegulation,
-} from "@/lib/legalErasure";
+import { type LegalErasureRegulation } from "@/lib/legalErasure";
+import { buildSanitizedCsv } from "@/lib/csvSanitizer";
+import { AppStorage } from "@/lib/persistence/storage";
+import { LegalErasureModal } from "@/components/declutter/LegalErasureModal";
 
 export type DeclutterStatus = "Recent email" | "No email 90+ days" | "No email 1+ year";
 
@@ -60,7 +56,7 @@ export interface DeclutterPlatform {
   riskLevel: "low" | "medium" | "high";
   riskReasons: string[];
   recommendedAction: string;
-  breachStatus: "unmitigated" | "mitigated" | "none";
+  breachStatus: "unmitigated" | "unverified_remediation" | "mitigated" | "none";
   breachDate?: string | null;
   lastSecurityEmailDate?: string | null;
 }
@@ -197,115 +193,48 @@ function WhyTooltip({ reason, type }: { reason: string; type: string }) {
 
 function TemporalBreachBadge({ platform }: { platform: DeclutterPlatform }) {
   if (platform.breachStatus === "none") return null;
-  const mitigated = platform.breachStatus === "mitigated";
-  const detail = mitigated
-    ? `Security activity: ${platform.lastSecurityEmailDate ?? "detected after breach"}`
-    : `Breach: ${platform.breachDate ?? "historical"} · Security activity: ${platform.lastSecurityEmailDate ?? "none detected after breach"}`;
+
+  const status = platform.breachStatus;
+  const isMitigated = status === "mitigated";
+  const isUnverified = status === "unverified_remediation";
+
+  let label = "Unmitigated Breach";
+  let style = {
+    color: "#fca5a5",
+    background: "color-mix(in oklch, #ef4444 14%, transparent)",
+    borderColor: "color-mix(in oklch, #ef4444 32%, transparent)",
+  };
+
+  if (isMitigated) {
+    label = "Breach Mitigated (Verified)";
+    style = {
+      color: "#34d399",
+      background: "color-mix(in oklch, #10b981 14%, transparent)",
+      borderColor: "color-mix(in oklch, #10b981 32%, transparent)",
+    };
+  } else if (isUnverified) {
+    label = "Remediation Signal (Unverified)";
+    style = {
+      color: "#fcd34d",
+      background: "color-mix(in oklch, #f59e0b 14%, transparent)",
+      borderColor: "color-mix(in oklch, #f59e0b 32%, transparent)",
+    };
+  }
+
+  const detail = isMitigated
+    ? `User-verified remediation: Password rotated and MFA configured`
+    : isUnverified
+    ? `Security activity detected on ${platform.lastSecurityEmailDate}, but password rotation and 2FA require confirmation.`
+    : `Breach: ${platform.breachDate ?? "historical"} · No subsequent security activity detected`;
 
   return (
     <span
       title={detail}
       className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold font-mono border whitespace-nowrap"
-      style={
-        mitigated
-          ? {
-              color: "#34d399",
-              background: "color-mix(in oklch, #10b981 14%, transparent)",
-              borderColor: "color-mix(in oklch, #10b981 32%, transparent)",
-            }
-          : {
-              color: "#fca5a5",
-              background: "color-mix(in oklch, #ef4444 14%, transparent)",
-              borderColor: "color-mix(in oklch, #ef4444 32%, transparent)",
-            }
-      }
+      style={style}
     >
-      {mitigated ? "Breach Mitigated" : "Unmitigated Breach"}
+      {label}
     </span>
-  );
-}
-
-function LegalErasureModal({
-  platform,
-  userEmail,
-  regulation,
-  onRegulationChange,
-  onClose,
-}: {
-  platform: DeclutterPlatform;
-  userEmail: string;
-  regulation: LegalErasureRegulation;
-  onRegulationChange: (value: LegalErasureRegulation) => void;
-  onClose: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-  const notice = generateLegalErasureNotice({
-    serviceName: platform.displayName,
-    senderDomain: platform.domain,
-    userEmail,
-    firstSeenDate: platform.firstSeen,
-    lastSeenDate: platform.lastSeen,
-    regulation,
-  });
-  const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-    notice.recipientEmail
-  )}&su=${encodeURIComponent(notice.subject)}&body=${encodeURIComponent(notice.body)}`;
-
-  async function copyNotice() {
-    try {
-      await navigator.clipboard.writeText(notice.body);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="legal-erasure-title">
-      <button type="button" aria-label="Close legal erasure notice" onClick={onClose} className="absolute inset-0 bg-black/70 backdrop-blur-sm cursor-default" />
-      <div className="relative z-10 flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border shadow-2xl" style={{ background: "var(--color-card)", borderColor: "color-mix(in oklch, white 14%, transparent)" }}>
-        <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5 md:p-6">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-foreground/50">
-              <ShieldCheck size={15} style={{ color: "var(--color-accent)" }} aria-hidden />
-              Legal data erasure generator
-            </div>
-            <h2 id="legal-erasure-title" className="mt-1 text-xl font-bold text-foreground">Request erasure from {platform.displayName}</h2>
-            <p className="mt-1 text-xs text-foreground/55">This generates a notice for your review. It does not send anything automatically.</p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-foreground/60 hover:bg-white/10 hover:text-foreground cursor-pointer"><X size={18} aria-hidden /></button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5 md:p-6">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="tablist" aria-label="Legal basis">
-            {([
-              ["DPDP_INDIA", "India DPDP Act", "Sec 12"],
-              ["GDPR_EU", "EU GDPR", "Art 17"],
-              ["COMBINED", "Combined Global", "Both"],
-            ] as const).map(([value, label, shortLabel]) => (
-              <button key={value} type="button" role="tab" aria-selected={regulation === value} onClick={() => onRegulationChange(value)} className="rounded-xl border px-3 py-2 text-left transition-colors cursor-pointer" style={{ background: regulation === value ? "color-mix(in oklch, var(--color-accent) 14%, transparent)" : "color-mix(in oklch, white 4%, transparent)", borderColor: regulation === value ? "color-mix(in oklch, var(--color-accent) 45%, transparent)" : "color-mix(in oklch, white 10%, transparent)" }}>
-                <span className="block text-xs font-semibold text-foreground">{label}</span>
-                <span className="text-[10px] font-mono text-foreground/50">{shortLabel}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-[10px] uppercase tracking-wider text-foreground/45">Recipient</div><div className="mt-1 break-all text-sm font-mono text-foreground">{notice.recipientEmail}</div></div>
-            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-[10px] uppercase tracking-wider text-foreground/45">Subject</div><div className="mt-1 text-sm text-foreground">{notice.subject}</div></div>
-          </div>
-
-          <pre className="mt-4 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl border border-white/10 bg-black/20 p-4 text-xs leading-relaxed text-foreground/75">{notice.body}</pre>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-white/10 p-4 md:p-5">
-          <button type="button" onClick={copyNotice} className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3.5 py-2 text-xs font-semibold text-foreground hover:bg-white/10 cursor-pointer">{copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}{copied ? "Copied!" : "Copy Notice to Clipboard"}</button>
-          <a href={notice.mailtoUrl} className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3.5 py-2 text-xs font-semibold text-foreground hover:bg-white/10"><Send size={14} aria-hidden />Open in Email Client</a>
-          <a href={gmailUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold shadow-lg hover:opacity-90" style={{ background: "var(--color-accent)", color: "#0a0a0a" }}><Mail size={14} aria-hidden />Open Gmail Compose</a>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -334,8 +263,10 @@ export function Declutter() {
   const [accountsOnly, setAccountsOnly] = useState(true);
   const [recencyFilter, setRecencyFilter] = useState<"all" | "no-email-90" | "no-email-1y">("all");
 
-  // Client-side 'Still using' state: Set of platform IDs marked as still used
-  const [stillUsingIds, setStillUsingIds] = useState<Set<string>>(new Set());
+  // Client-side 'Still using' state: Set of platform IDs marked as still used (persisted via AppStorage)
+  const [stillUsingIds, setStillUsingIds] = useState<Set<string>>(() =>
+    AppStorage.getStillUsingIds()
+  );
   const [legalPlatform, setLegalPlatform] = useState<DeclutterPlatform | null>(null);
   const [legalRegulation, setLegalRegulation] = useState<LegalErasureRegulation>("COMBINED");
 
@@ -347,6 +278,7 @@ export function Declutter() {
       } else {
         next.add(id);
       }
+      AppStorage.saveStillUsingIds(next);
       return next;
     });
   }
@@ -403,16 +335,29 @@ export function Declutter() {
                 message: data.message ?? "Scanning…",
               });
             } else if (data.type === "done") {
-              setPlatforms(data.platforms ?? []);
-              setSummary(
+              const platformList = data.platforms ?? [];
+              setPlatforms(platformList);
+              const summaryData =
                 data.summary ?? {
                   totalAccounts: 0,
                   inactiveAccounts: 0,
                   totalPlatforms: 0,
                   scannedEmails: 0,
-                }
-              );
+                };
+              setSummary(summaryData);
               setScanning(false);
+
+              // Persist scan history locally for audit and analytics
+              if (session?.user?.email && summaryData) {
+                AppStorage.recordScan({
+                  userEmail: session.user.email,
+                  totalPlatforms: summaryData.totalPlatforms ?? 0,
+                  totalAccounts: summaryData.totalAccounts ?? 0,
+                  inactiveAccounts: summaryData.inactiveAccounts ?? 0,
+                  highRiskAccounts: summaryData.highRiskAccounts ?? 0,
+                  overallRiskScore: summaryData.overallRiskScore ?? 0,
+                });
+              }
             } else if (data.type === "error") {
               setError(data.error ?? "An error occurred during scanning.");
               setScanning(false);
@@ -452,26 +397,26 @@ export function Declutter() {
     ];
 
     const rows = platforms.map((p) => [
-      `"${p.displayName.replace(/"/g, '""')}"`,
-      `"${p.domain.replace(/"/g, '""')}"`,
-      `"${p.type}"`,
-      `"${p.reason.replace(/"/g, '""')}"`,
-      `"${(p.senderDisplayName ?? "").replace(/"/g, '""')}"`,
-      `"${p.status}"`,
-      `"${p.statusBasis === "activity" ? "Activity email" : "Based on any email"}"`,
+      p.displayName,
+      p.domain,
+      p.type,
+      p.reason,
+      p.senderDisplayName ?? "",
+      p.status,
+      p.statusBasis === "activity" ? "Activity email" : "Based on any email",
       stillUsingIds.has(p.id) ? "Yes" : "No",
-      `"${p.lastAnyEmailFormatted ?? p.lastSeenFormatted}"`,
-      `"${p.lastActivityEmailFormatted ?? "None detected"}"`,
+      p.lastAnyEmailFormatted ?? p.lastSeenFormatted,
+      p.lastActivityEmailFormatted ?? "None detected",
       p.daysAgo,
       p.emailCount,
       p.signupLike ? "Yes" : "No",
-      `"${p.deleteUrl.replace(/"/g, '""')}"`,
+      p.deleteUrl,
       p.riskScore,
-      `"${p.riskLevel}"`,
-      `"${p.breachStatus}"`,
+      p.riskLevel,
+      p.breachStatus,
     ]);
 
-    const csvString = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const csvString = buildSanitizedCsv(headers, rows);
     const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
