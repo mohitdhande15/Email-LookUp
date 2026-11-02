@@ -80,6 +80,9 @@ model User {
   entities      Entity[]
   relationships Relationship[]
   evidence      Evidence[]
+  legalRequests LegalErasureRequest[]
+  cleanupAccounts CleanupAccount[]
+  brokerOptOuts   DataBrokerOptOut[]
 
   @@index([email])
 }
@@ -199,3 +202,70 @@ model Evidence {
   @@unique([userId, fingerprint])
   @@index([userId, findingId])
 }
+
+// ── Phase 4 Privacy Management Models ────────────────────────────────
+
+model LegalErasureRequest {
+  id                    String   @id
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetDomain          String
+  serviceName           String
+  regulation            String   // GDPR_EU, UK_GDPR, CCPA_US, DPDP_INDIA
+  requestDate           DateTime @default(now())
+  initialDeadlineDays   Int
+  initialDeadlineDate   DateTime
+  isExtensionClaimed    Boolean  @default(false)
+  extensionDeadlineDays Int?
+  extensionDeadlineDate DateTime?
+  status                String   // DRAFT, SUBMITTED, ACKNOWLEDGED, EXTENSION_NOTIFIED, COMPLETED, OVERDUE, DISPUTED
+  contactEmail          String
+  referenceNumber       String?
+  isStatutoryCommenced  Boolean  @default(true)
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, initialDeadlineDate])
+}
+
+model CleanupAccount {
+  id                    String   @id
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  domain                String
+  serviceName           String
+  status                String   // DISCOVERED, UNDER_REVIEW, KEEP_ACCOUNT, CLEANUP_PLANNED, etc.
+  deletionDifficulty    String   // EASY, MODERATE, DIFFICULT, UNKNOWN
+  deleteUrl             String?
+  directDeleteSupported Boolean  @default(false)
+  daysInactive          Int      @default(0)
+  lastActivityDate      DateTime?
+  statusHistory         Json     // Array of transition logs
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([userId, domain])
+  @@index([userId, status])
+}
+
+model DataBrokerOptOut {
+  id                    String   @id
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerId              String
+  status                String   // NOT_STARTED, IN_PROGRESS, OPTED_OUT, CONFIRMED
+  method                String   // ONLINE_FORM, EMAIL, POSTAL, PORTAL, AUTOMATED_API
+  submittedAt           DateTime?
+  confirmedAt           DateTime?
+  referenceNumber       String?
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([userId, brokerId])
+  @@index([userId, status])
+}
+
